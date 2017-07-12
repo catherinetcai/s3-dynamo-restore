@@ -50,6 +50,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	RootCmd.AddCommand(restoreCmd)
 	RootCmd.AddCommand(s3Cmd)
 
 	// Here you will define your flags and configuration settings.

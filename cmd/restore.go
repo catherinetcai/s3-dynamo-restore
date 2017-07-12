@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/catherinetcai/s3-dynamo-restore/restore"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/goamz/goamz/aws"
 	"github.com/spf13/cobra"
 )
@@ -23,25 +24,21 @@ Limitations:
 var (
 	bucketName   string
 	bucketPrefix string
-	dynamoTables []string
 	endTime      string
 	startTime    string
+	sourceTable  string
 	targetBucket string
+	targetTable  string
 )
 
 var restoreCmd = &cobra.Command{
 	Use:     "restore",
 	PreRunE: checkRequiredFlags,
+	Run:     restoreFromBackup,
 }
 
 var s3Cmd = &cobra.Command{
 	Use: "s3",
-}
-
-var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List from S3",
-	Run:   s3List,
 }
 
 var getCmd = &cobra.Command{
@@ -51,9 +48,8 @@ var getCmd = &cobra.Command{
 }
 
 func init() {
-	s3Cmd.AddCommand(listCmd)
 	s3Cmd.AddCommand(getCmd)
-	RootCmd.PersistentFlags().StringVarP(&dynamoTable, "table", "", "", "Dynamo table to get backups from")
+	RootCmd.PersistentFlags().StringVarP(&sourceTable, "sourceTable", "", "", "Dynamo table to get backups from")
 	RootCmd.PersistentFlags().StringVarP(&targetTable, "targetTable", "", "", "Dynamo table to write backups to")
 	RootCmd.PersistentFlags().StringVarP(&bucketName, "bucket", "b", "", "Bucket name to read backups from")
 	RootCmd.PersistentFlags().StringVarP(&bucketPrefix, "prefix", "p", "/", "Bucket prefix that backups are written to")
@@ -62,8 +58,8 @@ func init() {
 }
 
 func checkRequiredFlags(cmd *cobra.Command, args []string) error {
-	if len(dynamoTables) == 0 {
-		return flagError("tables")
+	if len(sourceTable) == 0 {
+		return flagError("sourceTable")
 	}
 	if bucketName == "" {
 		return flagError("bucket")
@@ -78,28 +74,31 @@ func flagError(flag string) error {
 func restoreFromBackup(cmd *cobra.Command, args []string) {
 	a := newAws()
 	// Gets back all keys associated with the Table name
-	keys, err := a.ListWithPrefix(a.Config.Prefix + dynamoTable + "/")
+	fmt.Println("Listing all keys from ", bucketName)
+	keys, err := a.ListWithPrefix(a.Config.Prefix + sourceTable + "/")
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Batch getting all keys...")
 	recs, err := a.BatchGet(keys)
 	if err != nil {
 		panic(err)
 	}
-	err = a.BatchWrite(dynamoTable, recs)
-}
-
-func s3List(cmd *cobra.Command, args []string) {
-	//a := newAws()
+	fmt.Println("Batch writing...")
+	err = a.BatchWrite(sourceTable, targetTable, recs)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func newAws() *restore.AWS {
 	cfg := &restore.AWSConfig{
-		Bucket: "fair-dynamo-backup-test",
+		Bucket: bucketName,
 		Prefix: "dynamodb/backup/",
-		Tables: []string{"dynamo-backup-test"},
+		Tables: []string{sourceTable},
 		Region: aws.USWest2,
 	}
+	spew.Dump(cfg)
 	a, _ := restore.NewAWS(cfg)
 	return a
 }
@@ -112,5 +111,5 @@ func s3Get(cmd *cobra.Command, args []string) {
 		return
 	}
 	get, _ := a.Get(list[0])
-	fmt.Println(get)
+	spew.Dump(get)
 }
