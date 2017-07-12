@@ -21,6 +21,14 @@ type StreamRecordWrapper struct {
 	EventName                   string                              `json:"eventName"`
 }
 
+type StreamRecordWrappers []*StreamRecordWrapper
+
+func (s *StreamRecordWrappers) Remove(i int) {
+	c := *s
+	c = append(c[:i], c[i+1:]...)
+	*s = c
+}
+
 func (s *StreamRecordWrapper) UnmarshalJSON(b []byte) error {
 	type Alias StreamRecordWrapper
 	aux := &struct {
@@ -40,7 +48,7 @@ func (s *StreamRecordWrapper) UnmarshalJSON(b []byte) error {
 
 func (s *StreamRecordWrapper) CreateWriteRequest() *dynamodb.WriteRequest {
 	// Insert & modify are both put requests
-	if s.EventName == dynamodbstreams.OperationTypeInsert || s.EventName == dynamodbstreams.OperationTypeModify {
+	if s.insertOrModifyOperation() {
 		return &dynamodb.WriteRequest{
 			PutRequest: &dynamodb.PutRequest{
 				Item: s.NewImage,
@@ -52,4 +60,17 @@ func (s *StreamRecordWrapper) CreateWriteRequest() *dynamodb.WriteRequest {
 			Key: s.OldImage,
 		},
 	}
+}
+
+func (s *StreamRecordWrapper) insertOrModifyOperation() bool {
+	return s.EventName == dynamodbstreams.OperationTypeInsert || s.EventName == dynamodbstreams.OperationTypeModify
+}
+
+func (s *StreamRecordWrapper) KeyName() (keyName string) {
+	// Ghetto hack to fetch back the key
+	for k, _ := range s.Keys {
+		keyName = k
+		break
+	}
+	return keyName
 }

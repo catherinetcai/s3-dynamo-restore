@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/catherinetcai/s3-dynamo-restore/restore"
@@ -33,8 +32,8 @@ var (
 
 var restoreCmd = &cobra.Command{
 	Use:     "restore",
-	PreRunE: checkRequiredFlags,
-	Run:     restoreFromBackup,
+	PreRunE: checkRequiredRestoreFlags,
+	RunE:    restoreFromBackup,
 }
 
 var s3Cmd = &cobra.Command{
@@ -49,17 +48,14 @@ var getCmd = &cobra.Command{
 
 func init() {
 	s3Cmd.AddCommand(getCmd)
-	RootCmd.PersistentFlags().StringVarP(&sourceTable, "sourceTable", "", "", "Dynamo table to get backups from")
-	RootCmd.PersistentFlags().StringVarP(&targetTable, "targetTable", "", "", "Dynamo table to write backups to")
-	RootCmd.PersistentFlags().StringVarP(&bucketName, "bucket", "b", "", "Bucket name to read backups from")
-	RootCmd.PersistentFlags().StringVarP(&bucketPrefix, "prefix", "p", "/", "Bucket prefix that backups are written to")
-	RootCmd.PersistentFlags().StringVarP(&startTime, "startTime", "s", "", "Time point to restore backups from. Format: YYYY-MM-DD-HH:MM")
-	RootCmd.PersistentFlags().StringVarP(&endTime, "endTime", "e", "", "Time point to restore backups from. Format: YYYY-MM-DD-HH:MM")
 }
 
-func checkRequiredFlags(cmd *cobra.Command, args []string) error {
-	if len(sourceTable) == 0 {
+func checkRequiredRestoreFlags(cmd *cobra.Command, args []string) error {
+	if sourceTable == "" {
 		return flagError("sourceTable")
+	}
+	if targetTable == "" {
+		return flagError("targetTable")
 	}
 	if bucketName == "" {
 		return flagError("bucket")
@@ -67,27 +63,23 @@ func checkRequiredFlags(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func flagError(flag string) error {
-	return errors.New("Error: Missing required flag " + flag)
-}
-
-func restoreFromBackup(cmd *cobra.Command, args []string) {
+func restoreFromBackup(cmd *cobra.Command, args []string) error {
 	a := newAws()
 	// Gets back all keys associated with the Table name
 	fmt.Println("Listing all keys from ", bucketName)
 	keys, err := a.ListWithPrefix(a.Config.Prefix + sourceTable + "/")
 	if err != nil {
-		panic(err)
+		return err
 	}
 	fmt.Println("Batch getting all keys...")
 	recs, err := a.BatchGet(keys)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	fmt.Println("Batch writing...")
-	err = a.BatchWrite(sourceTable, targetTable, recs)
+	err = a.BatchWrite(targetTable, recs)
 	if err != nil {
-		panic(err)
+		return err
 	}
 }
 
@@ -98,7 +90,6 @@ func newAws() *restore.AWS {
 		Tables: []string{sourceTable},
 		Region: aws.USWest2,
 	}
-	spew.Dump(cfg)
 	a, _ := restore.NewAWS(cfg)
 	return a
 }

@@ -26,29 +26,32 @@ func (a *AWS) getTable(name string) (*dynamodb.TableDescription, error) {
 }
 
 // BatchWrite to Dynamo
-func (a *AWS) BatchWrite(sourceTable, targetTable string, recs []*StreamRecordWrapper) error {
-	// Structure is map[tablename][]WriteRequest{PutRequest/DeleteRequest}
-	// Just does a quick check to ensure the table exists
-	_, err := a.getTable(sourceTable)
+func (a *AWS) BatchWrite(targetTable string, recs []*StreamRecordWrapper) error {
+	_, err := a.getTable(targetTable)
 	if err != nil {
 		return err
 	}
-	var wrs []*dynamodb.WriteRequest
+	dupeCheck := map[string]int{}
+	var wrs StreamRecordWrappers
 	for _, rec := range recs {
-		wrs = append(wrs, rec.CreateWriteRequest())
-	}
-	writeTable := sourceTable
-	if targetTable != "" {
-		err := a.CreateTableFrom(sourceTable, targetTable)
-		if err != nil {
-			return err
+		// If dupe, then remove the record at that index, append the new rec, and update the index
+		k := rec.KeyName()
+		wr := rec.CreateWriteRequest()
+		spew.Dump("Dupe check ", dupeCheck)
+		if idx, ok := dupeCheck[k]; ok {
+			fmt.Println("Found dupe. Removing from slice...")
+			wrs.Remove(idx)
 		}
-		writeTable = targetTable
+		if rec.insertOrModifyOperation() {
+			wrs = append(wrs, wr)
+		}
+		dupeCheck[k] = len(wrs) - 1
 	}
-	fmt.Println("Table to write write request to: ", writeTable)
-	req := map[string][]*dynamodb.WriteRequest{writeTable: wrs}
-	spew.Dump("Dynamo batch write ", req)
-	res, err := a.Dynamo.BatchWriteItem(&dynamodb.BatchWriteItemInput{RequestItems: req})
+	fmt.Println("Table to write write request to: ", targetTable)
+	req := map[string][]*dynamodb.WriteRequest{targetTable: wrs}
+	bwi := &dynamodb.BatchWriteItemInput{RequestItems: req}
+	spew.Dump(bwi)
+	res, err := a.Dynamo.BatchWriteItem(bwi)
 	if err != nil {
 		return err
 	}
@@ -56,18 +59,18 @@ func (a *AWS) BatchWrite(sourceTable, targetTable string, recs []*StreamRecordWr
 	return nil
 }
 
-// CreateTable creates a table
+// CreateTableFrom clones a table's attributes
 func (a *AWS) CreateTableFrom(original, target string) error {
 	res, err := a.Dynamo.DescribeTable(&dynamodb.DescribeTableInput{TableName: &original})
 	if err != nil {
 		return err
 	}
 	originalTd := res.Table
-	_, err = a.createEmptyTableClone(originalTd)
+	_, err = a.createEmptyTableClone(originalTd, target)
 	return err
 }
 
-func (a *AWS) createEmptyTableClone(td *dynamodb.TableDescription) (*dynamodb.TableDescription, error) {
+func (a *AWS) createEmptyTableClone(td *dynamodb.TableDescription, target string) (*dynamodb.TableDescription, error) {
 	var globalSecondaryIndexes []*dynamodb.GlobalSecondaryIndex
 	var localSecondaryIndexes []*dynamodb.LocalSecondaryIndex
 	globalSecondaryIndexDescs := td.GlobalSecondaryIndexes
@@ -87,7 +90,7 @@ func (a *AWS) createEmptyTableClone(td *dynamodb.TableDescription) (*dynamodb.Ta
 		LocalSecondaryIndexes:  localSecondaryIndexes,
 		ProvisionedThroughput:  createProvisionedThroughputFromDescription(td.ProvisionedThroughput),
 		StreamSpecification:    td.StreamSpecification,
-		TableName:              td.TableName,
+		TableName:              &target,
 	}
 	res, err := a.Dynamo.CreateTable(input)
 	if err != nil {
