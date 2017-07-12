@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	s3Max = 1000
+	s3Max = 99999
 )
 
 func s3Svc(cfg *AWSConfig) (*s3.S3, error) {
@@ -44,15 +44,15 @@ func (a *AWS) ListWithPrefix(prefix string) ([]string, error) {
 	separator := ""
 	marker := ""
 	for {
-		contents, err := a.Bucket.List(prefix, separator, marker, 1000)
+		res, err := a.Bucket.List(prefix, separator, marker, s3Max)
 		if err != nil {
 			return []string{}, err
 		}
-		for _, key := range contents.Contents {
+		for _, key := range res.Contents {
 			bucketContents[key.Key] = key
 		}
-		if contents.IsTruncated {
-			marker = contents.NextMarker
+		if res.IsTruncated {
+			marker = res.NextMarker
 		} else {
 			break
 		}
@@ -61,8 +61,8 @@ func (a *AWS) ListWithPrefix(prefix string) ([]string, error) {
 }
 
 // BatchGet from S3 bucket
-func (a *AWS) BatchGet(keys []string) ([]*StreamRecordWrapper, error) {
-	var recs []*StreamRecordWrapper
+func (a *AWS) BatchGet(keys []string) (StreamRecordWrappers, error) {
+	var recs StreamRecordWrappers
 	for _, key := range keys {
 		rec, err := a.Get(key)
 		if err != nil {
@@ -75,13 +75,13 @@ func (a *AWS) BatchGet(keys []string) ([]*StreamRecordWrapper, error) {
 }
 
 // Get from S3
-func (a *AWS) Get(key string) ([]*StreamRecordWrapper, error) {
+func (a *AWS) Get(key string) (StreamRecordWrappers, error) {
 	ioreader, err := a.Bucket.GetReader(key)
 	if err != nil {
 		return nil, err
 	}
 	reader := bufio.NewReader(ioreader)
-	var recs []*StreamRecordWrapper
+	var recs StreamRecordWrappers
 	for {
 		entry, err := reader.ReadBytes('\n')
 		if err != nil {

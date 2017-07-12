@@ -2,11 +2,15 @@ package restore
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/davecgh/go-spew/spew"
+)
+
+const (
+	BatchWriteItemSizeLimit = 25
 )
 
 func dynamo(cfg *AWSConfig) *dynamodb.DynamoDB {
@@ -26,36 +30,34 @@ func (a *AWS) getTable(name string) (*dynamodb.TableDescription, error) {
 }
 
 // BatchWrite to Dynamo
-func (a *AWS) BatchWrite(targetTable string, recs []*StreamRecordWrapper) error {
+func (a *AWS) BatchWrite(targetTable string, recs StreamRecordWrappers) error {
 	_, err := a.getTable(targetTable)
 	if err != nil {
 		return err
 	}
-	dupeCheck := map[string]int{}
-	var wrs StreamRecordWrappers
+	var wrs WriteRequests
+	sort.Sort(recs)
+	fmt.Println("Checking and removing any dupes...")
+	recs.RemoveDupes()
 	for _, rec := range recs {
-		// If dupe, then remove the record at that index, append the new rec, and update the index
-		k := rec.KeyName()
 		wr := rec.CreateWriteRequest()
-		spew.Dump("Dupe check ", dupeCheck)
-		if idx, ok := dupeCheck[k]; ok {
-			fmt.Println("Found dupe. Removing from slice...")
-			wrs.Remove(idx)
-		}
-		if rec.insertOrModifyOperation() {
-			wrs = append(wrs, wr)
-		}
-		dupeCheck[k] = len(wrs) - 1
+		wrs = append(wrs, wr)
 	}
-	fmt.Println("Table to write write request to: ", targetTable)
-	req := map[string][]*dynamodb.WriteRequest{targetTable: wrs}
-	bwi := &dynamodb.BatchWriteItemInput{RequestItems: req}
-	spew.Dump(bwi)
-	res, err := a.Dynamo.BatchWriteItem(bwi)
-	if err != nil {
-		return err
+	for i := 0; i < len(wrs); i += BatchWriteItemSizeLimit {
+		var writeItem WriteRequests
+		if i+BatchWriteItemSizeLimit > len(wrs) {
+			writeItem = wrs[i:]
+		} else {
+			writeItem = wrs[i : i+BatchWriteItemSizeLimit]
+		}
+		req := map[string][]*dynamodb.WriteRequest{targetTable: writeItem}
+		res, err := a.Dynamo.BatchWriteItem(&dynamodb.BatchWriteItemInput{RequestItems: req})
+		if err != nil {
+			fmt.Println("Error posting batch request...", err)
+			continue
+		}
+		fmt.Println("Batch write successful: ", res)
 	}
-	spew.Dump(res)
 	return nil
 }
 

@@ -81,12 +81,13 @@ func restoreFromBackup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	return nil
 }
 
 func newAws() *restore.AWS {
 	cfg := &restore.AWSConfig{
 		Bucket: bucketName,
-		Prefix: "dynamodb/backup/",
+		Prefix: bucketPrefix,
 		Tables: []string{sourceTable},
 		Region: aws.USWest2,
 	}

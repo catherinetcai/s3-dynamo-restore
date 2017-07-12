@@ -3,6 +3,7 @@ package restore
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
@@ -29,6 +30,42 @@ func (s *StreamRecordWrappers) Remove(i int) {
 	*s = c
 }
 
+func (s StreamRecordWrappers) Len() int {
+	return len(s)
+}
+
+func (s StreamRecordWrappers) Less(i, j int) bool {
+	return s[i].ApproximateCreationDateTime.Before(*s[j].ApproximateCreationDateTime)
+}
+
+func (s StreamRecordWrappers) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s *StreamRecordWrappers) RemoveDupes() {
+	c := *s
+	dupeKey := map[string]int{}
+	for i, rec := range c {
+		// Check for a duplicate key
+		attr := *rec.GetImage()[rec.KeyName()].S
+		if j, ok := dupeKey[attr]; ok {
+			c.Remove(j)
+			dupeKey[attr] = i - 1
+		} else {
+			dupeKey[attr] = i
+		}
+	}
+	*s = c
+}
+
+type WriteRequests []*dynamodb.WriteRequest
+
+func (w *WriteRequests) Remove(i int) {
+	c := *w
+	c = append(c[:i], c[i+1:]...)
+	*w = c
+}
+
 func (s *StreamRecordWrapper) UnmarshalJSON(b []byte) error {
 	type Alias StreamRecordWrapper
 	aux := &struct {
@@ -48,7 +85,7 @@ func (s *StreamRecordWrapper) UnmarshalJSON(b []byte) error {
 
 func (s *StreamRecordWrapper) CreateWriteRequest() *dynamodb.WriteRequest {
 	// Insert & modify are both put requests
-	if s.insertOrModifyOperation() {
+	if s.isInsertOrModifyOperation() {
 		return &dynamodb.WriteRequest{
 			PutRequest: &dynamodb.PutRequest{
 				Item: s.NewImage,
@@ -62,7 +99,7 @@ func (s *StreamRecordWrapper) CreateWriteRequest() *dynamodb.WriteRequest {
 	}
 }
 
-func (s *StreamRecordWrapper) insertOrModifyOperation() bool {
+func (s *StreamRecordWrapper) isInsertOrModifyOperation() bool {
 	return s.EventName == dynamodbstreams.OperationTypeInsert || s.EventName == dynamodbstreams.OperationTypeModify
 }
 
@@ -73,4 +110,17 @@ func (s *StreamRecordWrapper) KeyName() (keyName string) {
 		break
 	}
 	return keyName
+}
+
+func (s *StreamRecordWrapper) IsDupe(os *StreamRecordWrapper) bool {
+	own := s.GetImage()
+	other := os.GetImage()
+	return reflect.DeepEqual(own[s.KeyName()], other[s.KeyName()])
+}
+
+func (s *StreamRecordWrapper) GetImage() map[string]*dynamodb.AttributeValue {
+	if s.isInsertOrModifyOperation() {
+		return s.NewImage
+	}
+	return s.OldImage
 }
