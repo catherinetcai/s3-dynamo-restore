@@ -1,13 +1,8 @@
 package cmd
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/catherinetcai/s3-dynamo-restore/restore"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/goamz/goamz/aws"
@@ -47,25 +42,21 @@ var restorePipelineCmd = &cobra.Command{
 }
 
 func restorePipeline(cmd *cobra.Command, args []string) error {
-	//a := newAws()
-	f, err := os.Open("26abf4a1-5f35-438d-a751-17f19874cda2")
-	defer f.Close()
+	a := newAws()
+	fmt.Println("Listing all keys from ", bucketName)
+	keys, err := a.ListWithPrefix(a.Config.Prefix + sourceTable + "/")
 	if err != nil {
 		return err
 	}
-	reader := bufio.NewReader(f)
-	for {
-		entry, err := reader.ReadBytes('\n')
-		if err == io.EOF {
-			break
-		}
-		if err != nil && err != io.EOF {
-			return err
-		}
-		thing := map[string]*dynamodb.AttributeValue{}
-		json.Unmarshal(entry, &thing)
-		spew.Dump(thing)
-		break
+	fmt.Println("Batch getting all keys...")
+	recs, err := a.BatchGetPipelineRecords(keys)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Batch writing...")
+	err = a.BatchWritePipelineRecords(targetTable, recs)
+	if err != nil {
+		return err
 	}
 	return nil
 }
