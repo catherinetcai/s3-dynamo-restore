@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	gaws "github.com/goamz/goamz/aws"
 	"github.com/goamz/goamz/s3"
@@ -61,10 +62,10 @@ func (a *AWS) ListWithPrefix(prefix string) ([]string, error) {
 }
 
 // BatchGet from S3 bucket
-func (a *AWS) BatchGet(keys []string) (StreamRecordWrappers, error) {
+func (a *AWS) BatchGetStreamRecordWrappers(keys []string) (StreamRecordWrappers, error) {
 	var recs StreamRecordWrappers
 	for _, key := range keys {
-		rec, err := a.Get(key)
+		rec, err := a.GetStreamRecordWrappers(key)
 		if err != nil {
 			fmt.Println(err)
 			return nil, err
@@ -74,18 +75,20 @@ func (a *AWS) BatchGet(keys []string) (StreamRecordWrappers, error) {
 	return recs, nil
 }
 
-// Get from S3
-func (a *AWS) Get(key string) (StreamRecordWrappers, error) {
-	ioreader, err := a.Bucket.GetReader(key)
+// Get from S3 - this is where we need to support both StreamRecordWrapper + DynamoRecord type
+func (a *AWS) GetStreamRecordWrappers(key string) (StreamRecordWrappers, error) {
+	reader, err := a.getReader(key)
 	if err != nil {
 		return nil, err
 	}
-	reader := bufio.NewReader(ioreader)
 	var recs StreamRecordWrappers
 	for {
 		entry, err := reader.ReadBytes('\n')
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil && err != io.EOF {
+			return nil, err
 		}
 		rec := &StreamRecordWrapper{}
 		err = json.Unmarshal(entry, rec)
@@ -96,4 +99,50 @@ func (a *AWS) Get(key string) (StreamRecordWrappers, error) {
 		recs = append(recs, rec)
 	}
 	return recs, nil
+}
+
+func (a *AWS) BatchGetPipelineRecords(keys []string) (PipelineRecords, error) {
+	var recs PipelineRecords
+	for _, key := range keys {
+		rec, err := a.GetPipelineRecords(key)
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		recs = append(recs, rec...)
+	}
+	return recs, nil
+}
+
+func (a *AWS) GetPipelineRecords(key string) (PipelineRecords, error) {
+	reader, err := a.getReader(key)
+	if err != nil {
+		return nil, err
+	}
+	var recs PipelineRecords
+	for {
+		entry, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			break
+		}
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		rec := &PipelineRecord{}
+		err = json.Unmarshal(entry, rec)
+		if err != nil {
+			fmt.Println("Error unmarshalling entry: ", err.Error())
+			continue
+		}
+		recs = append(recs, rec)
+	}
+	return recs, nil
+}
+
+func (a *AWS) getReader(key string) (*bufio.Reader, error) {
+	ioreader, err := a.Bucket.GetReader(key)
+	if err != nil {
+		return nil, err
+	}
+	return bufio.NewReader(ioreader), nil
 }

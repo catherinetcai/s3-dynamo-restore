@@ -30,7 +30,7 @@ func (a *AWS) getTable(name string) (*dynamodb.TableDescription, error) {
 }
 
 // BatchWrite to Dynamo
-func (a *AWS) BatchWrite(targetTable string, recs StreamRecordWrappers) error {
+func (a *AWS) BatchWriteStreamRecordWrappers(targetTable string, recs StreamRecordWrappers) error {
 	_, err := a.getTable(targetTable)
 	if err != nil {
 		return err
@@ -43,6 +43,25 @@ func (a *AWS) BatchWrite(targetTable string, recs StreamRecordWrappers) error {
 		wr := rec.CreateWriteRequest()
 		wrs = append(wrs, wr)
 	}
+	a.pushBatchWriteRequests(targetTable, wrs)
+	return nil
+}
+
+func (a *AWS) BatchWritePipelineRecords(targetTable string, recs PipelineRecords) error {
+	_, err := a.getTable(targetTable)
+	if err != nil {
+		return err
+	}
+	var wrs WriteRequests
+	for _, rec := range recs {
+		wr := rec.CreateWriteRequest()
+		wrs = append(wrs, wr)
+	}
+	a.pushBatchWriteRequests(targetTable, wrs)
+	return nil
+}
+
+func (a *AWS) pushBatchWriteRequests(targetTable string, wrs WriteRequests) {
 	for i := 0; i < len(wrs); i += BatchWriteItemSizeLimit {
 		var writeItem WriteRequests
 		if i+BatchWriteItemSizeLimit > len(wrs) {
@@ -58,7 +77,6 @@ func (a *AWS) BatchWrite(targetTable string, recs StreamRecordWrappers) error {
 		}
 		fmt.Println("Batch write successful: ", res)
 	}
-	return nil
 }
 
 // CreateTableFrom clones a table's attributes

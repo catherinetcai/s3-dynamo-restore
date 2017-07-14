@@ -44,6 +44,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	RootCmd.AddCommand(cloneCmd)
 	RootCmd.AddCommand(restoreCmd)
+	RootCmd.AddCommand(restorePipelineCmd)
 	RootCmd.AddCommand(s3Cmd)
 
 	// Here you will define your flags and configuration settings.
